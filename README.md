@@ -27,4 +27,4 @@ https://github.com/alihani714/pinterest-honey-automation/blob/main/PRIVACY-POLIC
 [lolhaniweza5@gmail.com]
 ```
 
-Your website URL: `https://github.com/alihani714/pinterest-honey-automation/blob/main/README.md`
+website URL: `https://github.com/alihani714/pinterest-honey-automation/blob/main/README.md`
