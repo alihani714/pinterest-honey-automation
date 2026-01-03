@@ -43,7 +43,7 @@ You can:
 
 ## Contact
 For privacy-related questions, contact:
-- Email: [YOUR EMAIL]
+- Email: [lolhaniweza5@gmail.com]
 - Amazon Author Page: https://www.amazon.com/stores/ali-hani/author/B0FXHHZ6FR
 
 ## Pinterest Compliance
