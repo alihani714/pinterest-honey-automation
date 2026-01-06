@@ -8,7 +8,9 @@ app.use(express.json());
 
 const API_KEYS = {
   deepseek: process.env.DEEPSEEK_API_KEY,
-  pinterest: process.env.PINTEREST_API_KEY
+  pinterest: process.env.PINTEREST_API_KEY,
+  twitter: process.env.TWITTER_BEARER_TOKEN,
+  threads: process.env.THREADS_ACCESS_TOKEN
 };
 
 const themes = [
@@ -38,13 +40,16 @@ const themes = [
   }
 ];
 
-let postQueue = [];
 let stats = {
-  totalGenerated: 0,
-  lastGenerated: null
+  totalPosts: 0,
+  pinterest: 0,
+  twitter: 0,
+  threads: 0,
+  lastPost: null
 };
 
-async function generateContent(theme) {
+// Generate platform-optimized content with DeepSeek
+async function generateMultiPlatformContent(theme) {
   try {
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
@@ -57,83 +62,281 @@ async function generateContent(theme) {
         messages: [
           { 
             role: 'system', 
-            content: 'You are a Pinterest viral content expert. Create engaging pins with SEO optimization. Return ONLY valid JSON.'
+            content: 'You are a multi-platform social media expert. Create optimized content for Pinterest, Twitter/X, and Threads. Each platform needs different styles. Return ONLY valid JSON.'
           },
           { 
             role: 'user', 
-            content: `Create a Pinterest pin for: ${theme.name}
+            content: `Create content for all 3 platforms about: ${theme.name}
 
 Hook: ${theme.hook}
-Primary Keyword: ${theme.primary}
+Keyword: ${theme.primary}
+Book Link: https://amzn.to/4sklUiK
 
-Return ONLY this JSON structure:
+Return ONLY this JSON:
 {
-  "title": "compelling title under 100 chars with numbers or hooks",
-  "description": "engaging description with clear CTA to download free Honey Book",
-  "hashtags": ["#honey", "#health", "#wellness", "#natural", "#benefits"]
+  "pinterest": {
+    "title": "SEO-optimized Pinterest title (60-100 chars, numbers/hooks)",
+    "description": "Detailed Pinterest description with hashtags and CTA (max 500 chars)",
+    "hashtags": ["#honey", "#health", "#wellness", "#natural", "#freeebook"]
+  },
+  "twitter": {
+    "text": "Engaging tweet with hook, value, and CTA. Use emojis. Max 280 chars. Include link.",
+    "hashtags": ["#Honey", "#Health", "#Wellness"]
+  },
+  "threads": {
+    "text": "Conversational Threads post. More personal, storytelling. 2-3 sentences. Include link and emojis.",
+    "hashtags": ["#HoneyBenefits", "#NaturalHealth"]
+  }
 }`
           }
         ],
-        temperature: 0.85,
-        max_tokens: 500
+        temperature: 0.9,
+        max_tokens: 800
       })
     });
 
     const data = await response.json();
     const content = JSON.parse(data.choices[0].message.content);
     
-    console.log('✅ Content generated:', content.title);
+    console.log('✅ Multi-platform content generated');
     return content;
   } catch (error) {
     console.error('DeepSeek error:', error.message);
+    // Fallback content
     return {
-      title: `${theme.hook} | Free Honey Book`,
-      description: `Discover the power of ${theme.primary}! Download your FREE comprehensive Honey Book packed with science-backed benefits. Get instant access → https://amzn.to/4sklUiK Learn everything about honey's amazing properties!`,
-      hashtags: ['#honey', '#health', '#wellness', '#natural', '#freeebook', '#honeybenefits', '#healthylifestyle', '#naturalremedies']
+      pinterest: {
+        title: `${theme.hook} | Free Honey Book`,
+        description: `Discover ${theme.primary}! Get your FREE Honey Book → https://amzn.to/4sklUiK #honey #health #wellness #natural #freeebook`,
+        hashtags: ['#honey', '#health', '#wellness', '#natural', '#freeebook']
+      },
+      twitter: {
+        text: `${theme.hook}\n\nGet the FREE Honey Book 📖\n👉 https://amzn.to/4sklUiK\n\n#Honey #Health #Wellness`,
+        hashtags: ['#Honey', '#Health', '#Wellness']
+      },
+      threads: {
+        text: `Just discovered something amazing about honey! ${theme.hook.replace(/[🍯⚡🔥🛡️]/g, '').trim()}\n\nCheck out my free book → https://amzn.to/4sklUiK 🍯`,
+        hashtags: ['#HoneyBenefits', '#NaturalHealth']
+      }
     };
   }
 }
 
-async function generatePinReady(theme, content) {
-  const pinData = {
-    theme: theme.name,
-    title: content.title,
-    description: `${content.description}\n\n📖 Get Your FREE Honey Book on Amazon: https://amzn.to/4sklUiK\n\n${content.hashtags.join(' ')}\n\n#honeylove #beekeeping #naturalwellness`,
-    link: 'https://amzn.to/4sklUiK',
-    imageUrl: `https://via.placeholder.com/1000x1333/FFB800/1a1a1a?text=${encodeURIComponent(theme.textOverlay)}`,
-    textOverlay: theme.textOverlay,
-    keywords: theme.primary,
-    generatedAt: new Date().toISOString()
-  };
+// Generate image (same for all platforms)
+async function generateImage(theme) {
+  console.log('🎨 Generating image for:', theme.name);
   
-  return pinData;
+  // Using placeholder - replace with Google Imagen if needed
+  const imageUrl = `https://via.placeholder.com/1200x630/FFB800/1a1a1a?text=${encodeURIComponent(theme.textOverlay)}`;
+  
+  return {
+    url: imageUrl,
+    alt: theme.textOverlay
+  };
 }
 
-async function runAutomation() {
-  console.log('\n🚀 ===== STARTING CONTENT GENERATION =====');
+// Post to Pinterest
+async function postToPinterest(content, image, theme) {
+  if (!API_KEYS.pinterest) {
+    console.log('⚠️ Pinterest API key not set');
+    return { success: false, platform: 'pinterest' };
+  }
+
+  try {
+    const pinData = {
+      title: content.pinterest.title,
+      description: content.pinterest.description,
+      link: 'https://amzn.to/4sklUiK',
+      media_source: {
+        source_type: 'image_url',
+        url: image.url
+      },
+      alt_text: image.alt
+    };
+
+    const response = await fetch('https://api.pinterest.com/v5/pins', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEYS.pinterest}`
+      },
+      body: JSON.stringify(pinData)
+    });
+
+    const data = await response.json();
+    
+    if (response.ok) {
+      console.log('📌 Posted to Pinterest:', data.id);
+      stats.pinterest++;
+      return { success: true, platform: 'pinterest', id: data.id };
+    } else {
+      throw new Error(data.message || 'Pinterest API error');
+    }
+  } catch (error) {
+    console.error('❌ Pinterest error:', error.message);
+    return { success: false, platform: 'pinterest', error: error.message };
+  }
+}
+
+// Post to Twitter/X
+async function postToTwitter(content, image) {
+  if (!API_KEYS.twitter) {
+    console.log('⚠️ Twitter API key not set');
+    return { success: false, platform: 'twitter' };
+  }
+
+  try {
+    // Step 1: Upload media
+    const mediaResponse = await fetch('https://upload.twitter.com/1.1/media/upload.json', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEYS.twitter}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        media_data: image.url // In production, convert image to base64
+      })
+    });
+
+    // Step 2: Create tweet with media
+    const tweetData = {
+      text: content.twitter.text,
+      // media: { media_ids: [mediaId] } // Add after media upload works
+    };
+
+    const response = await fetch('https://api.twitter.com/2/tweets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEYS.twitter}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(tweetData)
+    });
+
+    const data = await response.json();
+    
+    if (response.ok) {
+      console.log('🐦 Posted to Twitter:', data.data.id);
+      stats.twitter++;
+      return { success: true, platform: 'twitter', id: data.data.id };
+    } else {
+      throw new Error(data.detail || 'Twitter API error');
+    }
+  } catch (error) {
+    console.error('❌ Twitter error:', error.message);
+    return { success: false, platform: 'twitter', error: error.message };
+  }
+}
+
+// Post to Threads
+async function postToThreads(content, image) {
+  if (!API_KEYS.threads) {
+    console.log('⚠️ Threads API key not set');
+    return { success: false, platform: 'threads' };
+  }
+
+  try {
+    // Threads uses Instagram Graph API
+    const response = await fetch(`https://graph.threads.net/v1.0/me/threads`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        access_token: API_KEYS.threads,
+        media_type: 'IMAGE',
+        image_url: image.url,
+        text: content.threads.text
+      })
+    });
+
+    const data = await response.json();
+    
+    // Step 2: Publish the thread
+    if (data.id) {
+      const publishResponse = await fetch(`https://graph.threads.net/v1.0/me/threads_publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          access_token: API_KEYS.threads,
+          creation_id: data.id
+        })
+      });
+
+      const publishData = await publishResponse.json();
+      
+      if (publishResponse.ok) {
+        console.log('🧵 Posted to Threads:', publishData.id);
+        stats.threads++;
+        return { success: true, platform: 'threads', id: publishData.id };
+      }
+    }
+    
+    throw new Error(data.error?.message || 'Threads API error');
+  } catch (error) {
+    console.error('❌ Threads error:', error.message);
+    return { success: false, platform: 'threads', error: error.message };
+  }
+}
+
+// Main automation function
+async function runMultiPlatformPost() {
+  console.log('\n🚀 ===== STARTING MULTI-PLATFORM POST =====');
   console.log('⏰ Time:', new Date().toLocaleString());
   
   try {
+    // Select random theme
     const theme = themes[Math.floor(Math.random() * themes.length)];
-    console.log(`📌 Selected theme: ${theme.name}`);
-    console.log(`🎯 Primary keyword: ${theme.primary}`);
+    console.log(`📌 Theme: ${theme.name}`);
     
-    const content = await generateContent(theme);
-    const pinReady = await generatePinReady(theme, content);
+    // Generate platform-optimized content
+    console.log('🤖 Generating multi-platform content...');
+    const content = await generateMultiPlatformContent(theme);
     
-    postQueue.push(pinReady);
-    stats.totalGenerated++;
-    stats.lastGenerated = new Date().toISOString();
+    // Generate single image for all platforms
+    const image = await generateImage(theme);
     
-    console.log('✅ CONTENT READY FOR POSTING!');
-    console.log('📊 Total generated:', stats.totalGenerated);
-    console.log('📝 Title:', pinReady.title);
-    console.log('🔗 Link:', pinReady.link);
+    // Post to all platforms simultaneously
+    console.log('📤 Posting to all platforms...');
+    const results = await Promise.all([
+      postToPinterest(content, image, theme),
+      postToTwitter(content, image),
+      postToThreads(content, image)
+    ]);
+    
+    // Summary
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+    
+    console.log('\n✅ ===== POST COMPLETE =====');
+    console.log(`✅ Successful: ${successful}/3 platforms`);
+    console.log(`❌ Failed: ${failed}/3 platforms`);
+    
+    results.forEach(result => {
+      if (result.success) {
+        console.log(`  ✓ ${result.platform}: Posted (ID: ${result.id})`);
+      } else {
+        console.log(`  ✗ ${result.platform}: Failed (${result.error || 'Not configured'})`);
+      }
+    });
+    
+    stats.totalPosts++;
+    stats.lastPost = new Date().toISOString();
+    
+    console.log(`\n📊 Total posts: ${stats.totalPosts}`);
+    console.log(`   Pinterest: ${stats.pinterest} | Twitter: ${stats.twitter} | Threads: ${stats.threads}`);
     console.log('================================\n');
     
-    return { success: true, theme: theme.name };
+    return {
+      success: true,
+      theme: theme.name,
+      results: results,
+      stats: stats
+    };
+    
   } catch (error) {
-    console.error('❌ Generation error:', error);
+    console.error('❌ Critical error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -142,60 +345,72 @@ async function runAutomation() {
 app.get('/', (req, res) => {
   res.json({ 
     status: 'running',
-    message: 'Pinterest Content Generator LIVE!',
+    message: 'Multi-Platform Content Automation LIVE!',
+    platforms: ['Pinterest', 'Twitter/X', 'Threads'],
     stats: stats,
-    queuedPins: postQueue.length,
-    themes: themes.length,
     schedule: 'Every 3 hours'
   });
 });
 
-app.get('/api/queue', (req, res) => {
+app.get('/api/stats', (req, res) => {
   res.json({
-    total: postQueue.length,
-    pins: postQueue
+    stats: stats,
+    platforms: {
+      pinterest: { 
+        enabled: !!API_KEYS.pinterest, 
+        posts: stats.pinterest 
+      },
+      twitter: { 
+        enabled: !!API_KEYS.twitter, 
+        posts: stats.twitter 
+      },
+      threads: { 
+        enabled: !!API_KEYS.threads, 
+        posts: stats.threads 
+      }
+    }
   });
-});
-
-app.get('/api/next', (req, res) => {
-  if (postQueue.length === 0) {
-    return res.json({ message: 'Queue is empty' });
-  }
-  res.json(postQueue[0]);
 });
 
 app.post('/api/run', async (req, res) => {
   console.log('🔵 Manual trigger received');
-  const result = await runAutomation();
+  const result = await runMultiPlatformPost();
   res.json(result);
 });
 
-app.get('/api/stats', (req, res) => {
-  res.json({ 
-    status: 'active',
-    stats: stats,
-    queueSize: postQueue.length,
-    themes: themes.length,
-    uptime: process.uptime()
-  });
+app.get('/api/preview', async (req, res) => {
+  try {
+    const theme = themes[Math.floor(Math.random() * themes.length)];
+    const content = await generateMultiPlatformContent(theme);
+    const image = await generateImage(theme);
+    
+    res.json({
+      theme: theme.name,
+      content: content,
+      image: image,
+      platforms: ['Pinterest', 'Twitter', 'Threads']
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Schedule automation every 3 hours
 cron.schedule('0 */3 * * *', () => {
   console.log('⏰ ===== SCHEDULED RUN TRIGGERED =====');
-  runAutomation();
+  runMultiPlatformPost();
 });
 
 // Run immediately on startup
-console.log('🚀 Server starting...');
-runAutomation();
+console.log('🚀 Multi-Platform Automation Starting...');
+runMultiPlatformPost();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n✅ ===== SERVER RUNNING =====`);
   console.log(`📡 Port: ${PORT}`);
-  console.log(`📅 Content Generation: Every 3 hours`);
-  console.log(`🎯 Themes loaded: ${themes.length}`);
-  console.log(`📊 Ready to generate viral Pinterest content!`);
+  console.log(`📅 Automation: Every 3 hours`);
+  console.log(`🎯 Platforms: Pinterest, Twitter/X, Threads`);
+  console.log(`🎨 Themes loaded: ${themes.length}`);
   console.log(`================================\n`);
 });
